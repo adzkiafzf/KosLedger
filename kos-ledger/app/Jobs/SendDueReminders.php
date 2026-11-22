@@ -29,17 +29,19 @@ class SendDueReminders implements ShouldQueue
             $user = $bill->occupancy->user;
             if (!$user->telegram_chat_id) continue;
 
-            $text = "⏰ Pengingat: Tagihan kos periode {$bill->period} sebesar Rp " .
-                    number_format($bill->total_amount, 0, ',', '.') .
-                    " jatuh tempo pada {$bill->due_date->format('d/m/Y')}. Segera lakukan pembayaran.";
+            $amount = number_format($bill->total_amount, 0, ',', '.');
+            $due    = $bill->due_date->format('d/m/Y');
+            $period = $bill->period;
+            $text   = "⏰ Pengingat\nTagihan kos periode {$period} sebesar <b>Rp {$amount}</b> jatuh tempo pada <b>{$due}</b>. Segera lakukan pembayaran.";
 
             $status = 'sent';
             $error  = null;
 
             try {
                 $response = Http::post("https://api.telegram.org/bot{$token}/sendMessage", [
-                    'chat_id' => $user->telegram_chat_id,
-                    'text'    => $text,
+                    'chat_id'    => $user->telegram_chat_id,
+                    'text'       => $text,
+                    'parse_mode' => 'HTML',
                 ]);
 
                 if (!$response->successful()) throw new \Exception($response->body());
