@@ -103,17 +103,24 @@ class PaymentController extends Controller
 
     private function createMidtransTransaction(string $orderId, int $amount, $user): ?string
     {
-        $serverKey = config('services.midtrans.server_key');
+        $serverKey = config('midtrans.server_key');
         if (!$serverKey) return null;
 
-        $payload = [
+        \Midtrans\Config::$serverKey    = $serverKey;
+        \Midtrans\Config::$isProduction = config('midtrans.is_production');
+        \Midtrans\Config::$isSanitized  = true;
+        \Midtrans\Config::$is3ds        = true;
+
+        $params = [
             'transaction_details' => ['order_id' => $orderId, 'gross_amount' => $amount],
             'customer_details'    => ['first_name' => $user->name],
         ];
 
-        $response = \Illuminate\Support\Facades\Http::withBasicAuth($serverKey, '')
-            ->post('https://app.sandbox.midtrans.com/snap/v1/transactions', $payload);
-
-        return $response->successful() ? $response->json('token') : null;
+        try {
+            return \Midtrans\Snap::getSnapToken($params);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('Midtrans Snap error', ['error' => $e->getMessage(), 'order_id' => $orderId]);
+            return null;
+        }
     }
 }

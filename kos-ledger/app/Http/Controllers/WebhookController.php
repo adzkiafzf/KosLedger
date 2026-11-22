@@ -107,7 +107,9 @@ class WebhookController extends Controller
             $payment->update([
                 'status'                  => $newStatus,
                 'provider_transaction_id' => $payload['transaction_id'] ?? null,
+                'payment_type'            => $payload['payment_type'] ?? null,
                 'paid_at'                 => $newStatus === 'success' ? now() : null,
+                'raw_notification'        => $payload,
             ]);
 
             // Langkah 9: Jadwalkan notifikasi dan blockchain hanya untuk pembayaran baru yang sukses
@@ -155,9 +157,9 @@ class WebhookController extends Controller
 
     private function verifyMidtransSignature(array $payload): bool
     {
-        $serverKey = config('services.midtrans.server_key');
-        $orderId   = $payload['order_id'] ?? '';
-        $statusCode = $payload['status_code'] ?? '';
+        $serverKey   = config('midtrans.server_key');
+        $orderId     = $payload['order_id'] ?? '';
+        $statusCode  = $payload['status_code'] ?? '';
         $grossAmount = $payload['gross_amount'] ?? '';
 
         $expected = hash('sha512', $orderId . $statusCode . $grossAmount . $serverKey);
