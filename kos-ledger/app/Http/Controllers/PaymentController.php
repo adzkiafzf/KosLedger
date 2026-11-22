@@ -93,6 +93,17 @@ class PaymentController extends Controller
         return response()->json(['message' => 'Pembayaran manual berhasil dicatat.'], 201);
     }
 
+    public function expire(Request $request, Payment $payment)
+    {
+        $this->authorizeAccess($request->user(), $payment);
+
+        abort_if($payment->status !== 'pending', 409, 'Hanya transaksi pending yang bisa di-expire.');
+
+        $payment->update(['status' => 'expired']);
+
+        return response()->json(['message' => 'Transaksi berhasil di-expire.']);
+    }
+
     private function authorizeAccess($user, Payment $payment): void
     {
         if ($user->role === 'anggota') {

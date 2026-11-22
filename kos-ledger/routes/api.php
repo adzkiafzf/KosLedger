@@ -92,6 +92,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================================================================
     Route::middleware('role:anggota')->group(function () {
         Route::post('bills/{bill}/checkout', [PaymentController::class, 'checkout']);
+        Route::post('payments/{payment}/expire', [PaymentController::class, 'expire']);
         Route::get('dashboard/member', [DashboardController::class, 'member']);
         Route::post('telegram/link-code', [TelegramController::class, 'linkCode']);
     });
