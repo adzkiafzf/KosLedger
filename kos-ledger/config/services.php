@@ -35,4 +35,22 @@ return [
         ],
     ],
 
+    'midtrans' => [
+        'server_key'    => env('MIDTRANS_SERVER_KEY'),
+        'client_key'    => env('MIDTRANS_CLIENT_KEY'),
+        'is_production' => env('MIDTRANS_IS_PRODUCTION', false),
+    ],
+
+    'ethereum' => [
+        'chain_id'         => env('ETHEREUM_CHAIN_ID', 11155111),
+        'rpc_url'          => env('ETHEREUM_RPC_URL'),
+        'contract_address' => env('ETHEREUM_CONTRACT_ADDRESS'),
+        'signer_url'       => env('ETHEREUM_SIGNER_URL', 'http://localhost:3001'),
+    ],
+
+    'telegram' => [
+        'bot_token'      => env('TELEGRAM_BOT_TOKEN'),
+        'webhook_secret' => env('TELEGRAM_WEBHOOK_SECRET'),
+    ],
+
 ];
