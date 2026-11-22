@@ -2,10 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\User;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\RateLimiter;
-use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
@@ -18,22 +18,22 @@ class AuthController extends Controller
             return response()->json(['message' => 'Terlalu banyak percobaan. Coba lagi nanti.'], 429);
         }
 
-        if (!Auth::attempt(['username' => $request->username, 'password' => $request->password, 'is_active' => true])) {
+        $user = User::where('username', $request->username)->where('is_active', true)->first();
+
+        if (!$user || !Hash::check($request->password, $user->password)) {
             RateLimiter::hit($key, 60);
             return response()->json(['message' => 'Kredensial tidak valid.'], 401);
         }
 
         RateLimiter::clear($key);
-        $request->session()->regenerate();
+        $token = $user->createToken('api')->plainTextToken;
 
-        return response()->json(['data' => $this->userPayload(Auth::user()), 'message' => 'Login berhasil.']);
+        return response()->json(['data' => $this->userPayload($user), 'token' => $token, 'message' => 'Login berhasil.']);
     }
 
     public function logout(Request $request)
     {
-        Auth::guard('web')->logout();
-        $request->session()->invalidate();
-        $request->session()->regenerateToken();
+        $request->user()->currentAccessToken()->delete();
 
         return response()->json(['message' => 'Logout berhasil.']);
     }
