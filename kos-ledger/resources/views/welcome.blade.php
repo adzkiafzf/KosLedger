@@ -1,27 +1,28 @@
-
 <!DOCTYPE html>
-<html lang="en">
+<html lang="id">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Laravel + Tailwind</title>
-    @vite(['resources/css/app.css', 'resources/js/app.js'])
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KosLedger</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..24,300..500,0..1,0&display=swap">
+  @vite(['resources/css/app.css', 'resources/js/app.js'])
+  {{-- Midtrans Snap SDK Integration --}}
+  <script
+    src="{{ config('midtrans.is_production') ? 'https://app.midtrans.com/snap/snap.js' : 'https://app.sandbox.midtrans.com/snap/snap.js' }}"
+    data-client-key="{{ config('midtrans.client_key') }}"
+  ></script>
+  <script>
+    window.MIDTRANS_CONFIG = {
+      isProduction: {{ config('midtrans.is_production') ? 'true' : 'false' }},
+      clientKey: "{{ config('midtrans.client_key') }}"
+    };
+  </script>
 </head>
-<body class="min-h-screen bg-gray-100 flex items-center justify-center">
-
-    <div class="bg-white p-10 rounded-2xl shadow-lg text-center">
-        <h1 class="text-3xl font-bold text-green-600 mb-3">
-            Laravel + Tailwind CSS
-        </h1>
-
-        <p class="text-gray-600 mb-5">
-            Tailwind CSS berhasil dijalankan!
-        </p>
-
-        <button class="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg">
-            Get Started
-        </button>
-    </div>
-
+<body>
+  <div id="app"></div>
+  <div class="toast" id="toast" role="status"></div>
+  <div class="proto" id="proto"></div>
 </body>
 </html>
