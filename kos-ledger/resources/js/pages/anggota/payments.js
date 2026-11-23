@@ -1,6 +1,7 @@
 import {
   getPayments,
   getPayment,
+  getChainRecord,
   verifyChainRecord,
   expirePayment,
 } from '../../api/payments.js';
@@ -8,8 +9,24 @@ import { apiError } from '../../api/client.js';
 import { go } from '../../core/router.js';
 import { pageHead, pill, ms, toast, modal, closeModal, mhead, kvs } from '../../components/ui.js';
 import { statCard, dataTable, searchField } from '../../components/widgets.js';
-import { emptyView, errorView } from '../../components/states.js';
+import { emptyView, errorView, loadingView } from '../../components/states.js';
 import { esc, tgl, rp, periodeLabel } from '../../utils/format.js';
+
+const SEPOLIA_EXPLORER = 'https://sepolia.etherscan.io/tx/';
+
+// Auto-refresh chain record sampai status bukan 'pending' atau timeout
+async function pollChainStatus(paymentId, maxAttempts = 10, intervalMs = 6000) {
+  for (let i = 0; i < maxAttempts; i++) {
+    await new Promise((r) => setTimeout(r, intervalMs));
+    try {
+      const rec = await getChainRecord(paymentId);
+      if (rec.chain_status !== 'pending') return rec;
+    } catch {
+      // Abaikan error sementara
+    }
+  }
+  return null;
+}
 
 function paymentStatusPill(status) {
   const map = {
@@ -76,7 +93,12 @@ function renderPaymentDetailModal(p, user) {
         <div class="kv"><span>Jaringan Distributed</span><b>Ethereum Sepolia Testnet</b></div>
         <div class="kv"><span>Status Pencatatan</span><b>${chain.chain_status === 'recorded' ? 'Tervalidasi On-Chain' : esc(chain.chain_status)}</b></div>
         <div class="kv"><span>Payload Hash SHA-256</span><span class="mono" style="font-size:11px;word-break:break-all">${esc(chain.payload_hash || '-')}</span></div>
-        <div class="kv"><span>Tx Hash (TXID)</span><span class="mono" style="font-size:11px;word-break:break-all">${chain.tx_hash ? esc(chain.tx_hash) : '<small style="color:var(--muted)">Menunggu konfirmasi blok transaksi</small>'}</span></div>
+        <div class="kv"><span>Tx Hash (TXID)</span>
+          ${chain.tx_hash
+            ? `<a href="${SEPOLIA_EXPLORER}${esc(chain.tx_hash)}" target="_blank" rel="noopener" class="mono" style="font-size:11px;word-break:break-all;color:var(--primary-d)">${esc(chain.tx_hash)} ${ms('open_in_new')}</a>`
+            : `<small style="color:var(--muted)">${chain.chain_status === 'pending' ? 'Menunggu konfirmasi blok…' : 'Belum tersedia'}</small>`
+          }
+        </div>
         <div class="kv"><span>Waktu Dicatat</span><b>${chain.recorded_at ? tgl(chain.recorded_at) : '–'}</b></div>
         ${chain.error_message ? `<div class="kv"><span style="color:var(--err)">Catatan Kendala</span><b style="color:var(--err)">${esc(chain.error_message)}</b></div>` : ''}
       </div>
@@ -85,6 +107,11 @@ function renderPaymentDetailModal(p, user) {
         <button class="btn s sm" id="btn-verify-chain" data-pid="${p.id}">
           ${ms('approval')}Verifikasi Integritas Hash
         </button>
+        ${chain.chain_status === 'pending' ? `
+          <button class="btn s sm" id="btn-refresh-chain" data-pid="${p.id}">
+            ${ms('refresh')}Refresh Status
+          </button>
+        ` : ''}
       </div>
       <div id="verify-result-box" style="margin-top:10px"></div>
     </div>
@@ -139,6 +166,74 @@ function renderPaymentDetailModal(p, user) {
       </div>
     </div>
   `;
+}
+
+// Attach semua event listener di dalam modal detail pembayaran
+function attachModalListeners(payId, user) {
+  const verifyBtn = document.getElementById('btn-verify-chain');
+  verifyBtn?.addEventListener('click', async () => {
+    verifyBtn.disabled = true;
+    verifyBtn.innerHTML = `<span class="spin" style="width:12px;height:12px;border-width:2px;margin-right:4px"></span>Memverifikasi…`;
+    const resBox = document.getElementById('verify-result-box');
+    try {
+      const vRes = await verifyChainRecord(payId);
+      const data = vRes?.data || {};
+      const isMatch = Boolean(data.match);
+      resBox.innerHTML = `
+        <div class="note" style="padding:12px;background:${isMatch ? 'var(--c2)' : 'var(--err-bg)'};border:1px solid ${isMatch ? 'var(--primary)' : 'var(--err)'}">
+          <b style="color:${isMatch ? 'var(--primary-d)' : 'var(--err)'};display:flex;gap:6px;align-items:center;font-size:13px">
+            ${ms(isMatch ? 'verified' : 'error')}
+            ${isMatch ? 'Hash Cocok! Data Integritas Terverifikasi' : 'Peringatan: Hash Tidak Cocok'}
+          </b>
+          <small style="display:block;margin-top:6px;color:var(--text);font-size:11px;word-break:break-all">
+            Stored: ${esc(data.stored_hash || '-')}<br>Recomputed: ${esc(data.recomputed_hash || '-')}
+          </small>
+          <small style="color:var(--muted);display:block;margin-top:4px">${esc(vRes.message || '')}</small>
+        </div>`;
+    } catch (vErr) {
+      resBox.innerHTML = `<div class="note" style="padding:10px;background:var(--err-bg);color:var(--err);font-size:12px">${ms('error')} ${esc(apiError(vErr))}</div>`;
+    } finally {
+      verifyBtn.disabled = false;
+      verifyBtn.innerHTML = `${ms('approval')}Verifikasi Ulang Hash`;
+    }
+  });
+
+  const refreshChainBtn = document.getElementById('btn-refresh-chain');
+  refreshChainBtn?.addEventListener('click', async () => {
+    refreshChainBtn.disabled = true;
+    refreshChainBtn.innerHTML = `<span class="spin" style="width:12px;height:12px;border-width:2px;margin-right:4px"></span>Memuat…`;
+    try {
+      const updated = await getChainRecord(payId);
+      if (updated.chain_status !== 'pending') {
+        const freshPayment = await getPayment(payId);
+        freshPayment.chain_record = updated;
+        modal(renderPaymentDetailModal(freshPayment, user));
+        attachModalListeners(payId, user);
+      } else {
+        toast('Status blockchain masih pending. Coba lagi beberapa saat.', 'warn');
+        refreshChainBtn.disabled = false;
+        refreshChainBtn.innerHTML = `${ms('refresh')}Refresh Status`;
+      }
+    } catch (rErr) {
+      toast(apiError(rErr) || 'Gagal memuat status blockchain.', 'err');
+      refreshChainBtn.disabled = false;
+      refreshChainBtn.innerHTML = `${ms('refresh')}Refresh Status`;
+    }
+  });
+
+  const modalExpireBtn = document.getElementById('btn-modal-expire');
+  modalExpireBtn?.addEventListener('click', async () => {
+    modalExpireBtn.disabled = true;
+    try {
+      await expirePayment(payId);
+      toast('Sesi pending berhasil dibatalkan.', 'ok');
+      closeModal();
+      go('anggota-riwayat');
+    } catch (exErr) {
+      toast(apiError(exErr) || 'Gagal membatalkan sesi.', 'err');
+      modalExpireBtn.disabled = false;
+    }
+  });
 }
 
 export default async function payments({ user }) {
@@ -349,60 +444,7 @@ export default async function payments({ user }) {
           try {
             const payData = await getPayment(payId);
             modal(renderPaymentDetailModal(payData, user));
-
-            // Handler tombol verifikasi hash on-chain di dalam modal
-            const verifyBtn = document.getElementById('btn-verify-chain');
-            verifyBtn?.addEventListener('click', async () => {
-              verifyBtn.disabled = true;
-              verifyBtn.innerHTML = `<span class="spin" style="width:12px;height:12px;border-width:2px;margin-right:4px"></span>Memverifikasi di Jaringan Sepolia...`;
-
-              const resBox = document.getElementById('verify-result-box');
-              try {
-                const vRes = await verifyChainRecord(payId);
-                const data = vRes?.data || {};
-                const isMatch = Boolean(data.match);
-
-                resBox.innerHTML = `
-                  <div class="note" style="padding:12px;background:${isMatch ? 'var(--c2)' : 'var(--err-bg)'};border:1px solid ${isMatch ? 'var(--primary)' : 'var(--err)'}">
-                    <b style="color:${isMatch ? 'var(--primary-d)' : 'var(--err)'};display:flex;gap:6px;align-items:center;font-size:13px">
-                      ${ms(isMatch ? 'verified' : 'error')}
-                      ${isMatch ? 'Hash Cocok! Data Integritas Terverifikasi' : 'Peringatan: Hash Tidak Cocok'}
-                    </b>
-                    <small style="display:block;margin-top:6px;color:var(--text);font-family:var(--mono);font-size:11px;word-break:break-all">
-                      Stored: ${esc(data.stored_hash || '-')}<br>
-                      Recomputed: ${esc(data.recomputed_hash || '-')}
-                    </small>
-                    <small style="color:var(--muted);display:block;margin-top:4px">
-                      ${esc(vRes.message || 'Verifikasi selesai.')}
-                    </small>
-                  </div>
-                `;
-              } catch (vErr) {
-                resBox.innerHTML = `
-                  <div class="note" style="padding:10px;background:var(--err-bg);color:var(--err);font-size:12px">
-                    ${ms('error')} ${esc(apiError(vErr) || 'Gagal memverifikasi catatan blockchain.')}
-                  </div>
-                `;
-              } finally {
-                verifyBtn.disabled = false;
-                verifyBtn.innerHTML = `${ms('approval')}Verifikasi Ulang Hash`;
-              }
-            });
-
-            // Handler tombol batalkan sesi pending di dalam modal
-            const modalExpireBtn = document.getElementById('btn-modal-expire');
-            modalExpireBtn?.addEventListener('click', async () => {
-              modalExpireBtn.disabled = true;
-              try {
-                await expirePayment(payId);
-                toast('Sesi pending berhasil dibatalkan.', 'ok');
-                closeModal();
-                go('anggota-riwayat');
-              } catch (exErr) {
-                toast(apiError(exErr) || 'Gagal membatalkan sesi.', 'err');
-                modalExpireBtn.disabled = false;
-              }
-            });
+            attachModalListeners(payId, user);
           } catch (err) {
             toast(apiError(err) || 'Gagal memuat detail transaksi.', 'err');
           } finally {

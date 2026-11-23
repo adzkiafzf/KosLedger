@@ -2,6 +2,7 @@ import {
   getPayments,
   getPayment,
   getChainRecords,
+  getChainRecord,
   verifyChainRecord,
   retryChainRecord,
 } from '../../api/payments.js';
@@ -12,6 +13,8 @@ import { pageHead, pill, avatar, ms, toast, modal, closeModal, mhead, kvs } from
 import { statCard, dataTable, searchField } from '../../components/widgets.js';
 import { errorView, loadingView } from '../../components/states.js';
 import { esc, tgl, rp, initials } from '../../utils/format.js';
+
+const SEPOLIA_EXPLORER = 'https://sepolia.etherscan.io/tx/';
 
 const head = () =>
   pageHead({
@@ -88,12 +91,22 @@ function paymentDetailModal(p) {
         <div class="kvs" style="margin:8px 0">
           <div class="kv"><span>Jaringan</span><b>Ethereum Sepolia Testnet</b></div>
           <div class="kv"><span>Payload Hash</span><span class="mono" style="font-size:11px;word-break:break-all">${esc(chain.payload_hash || '-')}</span></div>
-          <div class="kv"><span>Tx Hash (TXID)</span><span class="mono" style="font-size:11px;word-break:break-all">${chain.tx_hash ? esc(chain.tx_hash) : '<small style="color:var(--muted)">Menunggu konfirmasi blok</small>'}</span></div>
+          <div class="kv"><span>Tx Hash (TXID)</span>
+            ${chain.tx_hash
+              ? `<a href="${SEPOLIA_EXPLORER}${esc(chain.tx_hash)}" target="_blank" rel="noopener" class="mono" style="font-size:11px;word-break:break-all;color:var(--primary-d)">${esc(chain.tx_hash)} ${ms('open_in_new')}</a>`
+              : `<small style="color:var(--muted)">${chain.chain_status === 'pending' ? 'Menunggu konfirmasi blok…' : 'Belum tersedia'}</small>`
+            }
+          </div>
           <div class="kv"><span>Waktu Dicatat</span><b>${chain.recorded_at ? tgl(chain.recorded_at) : '–'}</b></div>
           ${chain.error_message ? `<div class="kv"><span style="color:var(--err)">Pesan Kendala</span><b style="color:var(--err)">${esc(chain.error_message)}</b></div>` : ''}
         </div>
         <div class="acts" style="margin-top:10px" id="chain-action-area">
           <button class="btn s sm" id="btn-verify-hash" data-pid="${p.id}">${ms('approval')}Verifikasi Integritas Hash</button>
+          ${
+            chain.chain_status === 'pending'
+              ? `<button class="btn s sm" id="btn-refresh-chain-b" data-pid="${p.id}">${ms('refresh')}Refresh Status</button>`
+              : ''
+          }
           ${
             chain.chain_status === 'failed' && p.status === 'success'
               ? `<button class="btn p sm" id="btn-retry-chain" data-pid="${p.id}">${ms('refresh')}Coba Catat Ulang</button>`
@@ -191,6 +204,46 @@ async function showPaymentDetail(id) {
         toast(apiError(err), 'err');
         btn.disabled = false;
         btn.innerHTML = `${ms('refresh')}Coba Catat Ulang`;
+      }
+    });
+
+    // Listener tombol Refresh Status Blockchain (saat pending)
+    document.getElementById('btn-refresh-chain-b')?.addEventListener('click', async () => {
+      const btn = document.getElementById('btn-refresh-chain-b');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spin"></span>Memuat…';
+      try {
+        const updated = await getChainRecord(id);
+        if (updated.chain_status !== 'pending') {
+          const freshPayment = await getPayment(id);
+          freshPayment.chain_record = updated;
+          modal(paymentDetailModal(freshPayment));
+          // Re-attach semua listener setelah modal di-render ulang
+          document.getElementById('btn-verify-hash')?.addEventListener('click', async () => {
+            const vBtn = document.getElementById('btn-verify-hash');
+            const box = document.getElementById('verify-result-box');
+            vBtn.disabled = true;
+            vBtn.innerHTML = '<span class="spin"></span>Memverifikasi…';
+            try {
+              const res = await verifyChainRecord(id);
+              const match = res.data?.match;
+              box.innerHTML = `<div class="note ${match ? '' : 'err2'}" style="margin:0;font-size:12px">${ms(match ? 'check_circle' : 'error')}<span><b>${match ? 'Hash Cocok (Valid)' : 'Hash Tidak Cocok'}</b><br>${esc(res.message)}</span></div>`;
+            } catch (err) {
+              box.innerHTML = `<div class="note err2" style="margin:0;font-size:12px">${ms('error')}<span>${esc(apiError(err))}</span></div>`;
+            } finally {
+              vBtn.disabled = false;
+              vBtn.innerHTML = `${ms('approval')}Verifikasi Integritas Hash`;
+            }
+          });
+        } else {
+          toast('Status blockchain masih pending. Coba lagi beberapa saat.', 'warn');
+          btn.disabled = false;
+          btn.innerHTML = `${ms('refresh')}Refresh Status`;
+        }
+      } catch (err) {
+        toast(apiError(err) || 'Gagal memuat status blockchain.', 'err');
+        btn.disabled = false;
+        btn.innerHTML = `${ms('refresh')}Refresh Status`;
       }
     });
   } catch (err) {

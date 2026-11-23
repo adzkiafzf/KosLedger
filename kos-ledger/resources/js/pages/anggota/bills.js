@@ -1,10 +1,56 @@
 import { getBills, getBill, checkoutBill } from '../../api/bills.js';
+import { getPayment } from '../../api/payments.js';
 import { apiError } from '../../api/client.js';
 import { go } from '../../core/router.js';
 import { pageHead, pill, ms, toast, modal, closeModal, mhead, kvs } from '../../components/ui.js';
 import { statCard, dataTable, searchField } from '../../components/widgets.js';
 import { emptyView, errorView } from '../../components/states.js';
 import { esc, tgl, rp, periodeLabel } from '../../utils/format.js';
+
+// Polling status pembayaran dari backend sampai status final atau timeout
+async function pollPaymentStatus(paymentId, maxAttempts = 12, intervalMs = 5000) {
+  for (let i = 0; i < maxAttempts; i++) {
+    await new Promise((r) => setTimeout(r, intervalMs));
+    try {
+      const p = await getPayment(paymentId);
+      if (p.status !== 'pending') return p;
+    } catch {
+      // Abaikan error sementara, lanjut polling
+    }
+  }
+  return null;
+}
+
+function showWaitingModal(paymentId, onDone) {
+  modal(`
+    ${mhead('Menunggu Konfirmasi Backend', 'Jangan tutup halaman ini', 'hourglass_top')}
+    <div class="mb">
+      <div style="text-align:center;padding:24px 0">
+        <span class="spin" style="width:40px;height:40px;border-width:4px;margin:0 auto 16px;display:block"></span>
+        <b style="font-size:15px;color:var(--primary-d)">Memverifikasi Pembayaran…</b>
+        <p style="font-size:13px;color:var(--muted);margin:8px 0 0">
+          Sistem sedang menunggu konfirmasi dari Midtrans. Proses ini biasanya selesai dalam beberapa detik.
+        </p>
+      </div>
+      <div class="note" style="background:var(--c1)">
+        ${ms('info')}
+        <span style="font-size:12px;color:var(--muted)">
+          Status pembayaran hanya berubah setelah webhook dari Midtrans diterima dan diverifikasi oleh backend.
+        </span>
+      </div>
+    </div>
+  `);
+
+  pollPaymentStatus(paymentId).then((result) => {
+    closeModal();
+    if (!result) {
+      toast('Konfirmasi membutuhkan waktu lebih lama. Cek status di Riwayat Pembayaran.', 'warn');
+      go('anggota-riwayat');
+      return;
+    }
+    if (typeof onDone === 'function') onDone(result);
+  });
+}
 
 function formatInvoiceId(b) {
   return `#INV-${b.period ? b.period.replace('-', '') : ''}-${String(b.id || 1).padStart(3, '0')}`;
@@ -178,20 +224,27 @@ async function startCheckout(billId, btn) {
     }
 
     window.snap.pay(snapToken, {
-      onSuccess(result) {
-        toast('Pembayaran berhasil diproses oleh Midtrans!', 'ok');
+      onSuccess() {
+        // Snap callback bukan bukti final — tunggu konfirmasi webhook backend
+        showWaitingModal(paymentId, (finalPayment) => {
+          if (finalPayment.status === 'success') {
+            toast('Pembayaran berhasil dikonfirmasi oleh sistem!', 'ok');
+          } else {
+            toast(`Status pembayaran: ${finalPayment.status}. Cek riwayat untuk detail.`, 'warn');
+          }
+          go('anggota-riwayat');
+        });
+      },
+      onPending() {
+        toast('Sesi pembayaran tercatat. Menunggu penyelesaian dari penyedia layanan.', 'warn');
         go('anggota-riwayat');
       },
-      onPending(result) {
-        toast('Sesi pembayaran tercatat (Pending). Silakan selesaikan pembayaran.', 'warn');
-        go('anggota-riwayat');
-      },
-      onError(result) {
-        toast('Pembayaran ditolak atau dibatalkan oleh gateway Midtrans.', 'err');
+      onError() {
+        toast('Pembayaran ditolak atau gagal di gateway Midtrans.', 'err');
         go('anggota-tagihan');
       },
       onClose() {
-        toast('Jendela pembayaran Snap ditutup sebelum transaksi selesai.', 'warn');
+        toast('Jendela pembayaran ditutup sebelum transaksi selesai.', 'warn');
         go('anggota-tagihan');
       },
     });
